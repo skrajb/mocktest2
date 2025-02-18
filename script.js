@@ -1,0 +1,408 @@
+let words = "";
+const urlParams = new URLSearchParams(window.location.search);
+const exercise = urlParams.get('exercise');
+
+if (exercise) {
+    document.getElementById("test_text").innerText = decodeURIComponent(exercise);
+    words = decodeURIComponent(exercise).split(/\s+/); // Split the exercise into words for typing
+} else {
+    document.getElementById("test_text").innerText = "Loading...";
+    words = []; // Initialize words as an empty array if no exercise is provided
+}
+
+let currentChunkIndex = 0; // Index of the current chunk being displayed
+let currentIndex = 0; // Index of the current word being typed
+let correctWordsTyped = 0;
+let wrongWords = 0;
+let totalTypedWords = 0; // New variable to count all typed words
+let timer = null;
+let timeRemaining = 0; // Will be set based on the timer selection
+let testCompleted = false;
+let correctCharsTyped = 0; // New variable to count characters of correct words
+let wrongCharsTyped = 0; // New variable to count characters of wrong words
+let originalWords = []; // Store the original words for comparison
+let allTypedWords = []; // Array to store all sets of typed words
+let startTime = null; // New variable to track the start time
+let lastDisplayedWords = ""; // Store the last displayed words
+let backspaceCount = 0; // New variable to count backspaces
+let typedChunks = []; // Array to store typed chunks
+let timeTaken = 0;
+let totalSkippedWords=0;
+// Calculate chunk size based on total words
+const totalWords = words.length;
+const chunkSize = Math.ceil(totalWords / 10); // Size of each chunk
+
+const updateDisplayTime = () => {
+    const minutes = Math.floor(timeRemaining / 60).toString().padStart(2, "0");
+    const seconds = (timeRemaining % 60).toString().padStart(2, "0");
+    document.getElementById("time_remaining").textContent = `Time Remaining: ${minutes}:${seconds}`;
+};
+
+// Disable right-click and specific keyboard shortcuts
+document.addEventListener('contextmenu', function(event) {
+    event.preventDefault();
+});
+
+// Disable specific keyboard shortcuts
+document.addEventListener('keydown', function(event) {
+    // Disable Ctrl key
+    if (event.ctrlKey) {
+        event.preventDefault();
+    }
+
+    // Disable Ctrl + U
+    if (event.ctrlKey && event.key === 'u') {
+        event.preventDefault();
+    }
+    // Disable Ctrl + P
+    if (event.ctrlKey && event.key === 'p') {
+        event.preventDefault();
+    }
+    // Disable Ctrl + C
+    if (event.ctrlKey && event.key === 'c') {
+        event.preventDefault();
+    }
+
+    // Disable F12
+    if (event.key === 'F12') {
+        event.preventDefault();
+    }
+});
+
+window.onload = function() {
+    resetTest(); // Call resetTest to initialize values
+};
+
+const resetTest = () => {
+    clearInterval(timer);
+    timer = null;
+    timeRemaining = parseInt(document.getElementById("timer").value); // Set time based on user selection
+    currentIndex = 0; // Reset current index
+    correctWordsTyped = 0;
+    wrongWords = 0;
+    totalTypedWords = 0; // Reset total typed words
+    correctCharsTyped = 0; // Reset correct characters count
+    wrongCharsTyped = 0; // Reset wrong characters count
+    document.getElementById("typed_text").value = ""; // Clear the input on reset
+    document.getElementById("results").innerHTML = "";
+    document.getElementById("test_text").innerHTML = ""; // Clear previous text
+    updateDisplayTime();
+    updateLiveResults(); // Reset live results display
+    displayNextWords(); // Display the first set of words
+	let totalSkippedWords=0;
+};
+
+const displayNextWords = () => {
+    const nextWords = words.slice(currentIndex, currentIndex + chunkSize).join(" "); // Use chunkSize instead of 40
+    originalWords.push(nextWords); // Store the original words as a chunk
+    lastDisplayedWords = nextWords; // Update the last displayed words
+    document.getElementById("test_text").innerHTML = `<div class="word-set">${nextWords}</div>`; // Replace previous words
+    updateCurrentChunkDisplay(); // Update the chunk display when new words are shown
+};
+
+const startTimer = () => {
+    if (!timer) {
+        startTime = Date.now(); // Record the start time
+        timer = setInterval(() => {
+            if (timeRemaining > 0) {
+                timeRemaining--;
+                updateDisplayTime();
+            } else {
+                clearInterval(timer);
+                timer = null;
+                testCompleted = true;
+                handleTestCompletion(); // Handle test completion
+            }
+        }, 1000);
+    }
+};
+
+// Function to calculate the Levenshtein distance between two strings
+const levenshteinDistance = (a, b) => {
+    const dp = Array(a.length + 1).fill(null).map(() => Array(b.length + 1).fill(0));
+
+    for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+    for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+
+    for (let i = 1; i <= a.length; i++) {
+        for (let j = 1; j <= b.length; j++) {
+            if (a[i - 1] === b[j - 1]) {
+                dp[i][j] = dp[i - 1][j - 1];
+            } else {
+                dp[i][j] = Math.min(
+                    dp[i - 1][j],    // Deletion
+                    dp[i][j - 1],    // Insertion
+                    dp[i - 1][j - 1] // Substitution
+                ) + 1;
+            }
+        }
+    }
+    return dp[a.length][b.length];
+};
+const countResults = () => {
+    const typedText = document.getElementById("typed_text").value.trim();
+    const typedWords = typedText.split(/\s+/).filter(word => word.length > 0);
+    const currentWords = words.slice(currentIndex, currentIndex + chunkSize);
+
+    let correctCount = 0;
+    let wrongCount = 0;
+    let skippedCount = 0;
+    let originalIndex = 0;
+
+    for (let typedIndex = 0; typedIndex < typedWords.length; typedIndex++) {
+        if (originalIndex >= currentWords.length) {
+            // Extra words typed beyond the expected words
+            wrongCount++;
+            wrongCharsTyped += typedWords[typedIndex].length;
+            continue; 
+        }
+
+        if (typedWords[typedIndex] === currentWords[originalIndex]) {
+            // Exact match
+            correctCount++;
+            correctCharsTyped += typedWords[typedIndex].length;
+            originalIndex++;
+        } else if (levenshteinDistance(typedWords[typedIndex], currentWords[originalIndex]) <= 1) {
+            // Small typo detected (1-letter difference)
+            wrongCount++;
+            wrongCharsTyped += typedWords[typedIndex].length;
+            // Do not increment originalIndex here
+        } else {
+            // Look ahead for an exact match
+            let matchFound = false;
+            for (let lookahead = 1; lookahead <= 3; lookahead++) { // Limit lookahead to 3 words
+                if (originalIndex + lookahead < currentWords.length &&
+                    typedWords[typedIndex] === currentWords[originalIndex + lookahead]) {
+                    
+                    // Count skipped words
+                    skippedCount += lookahead; // Count all skipped words
+                    for (let i = 0; i < lookahead; i++) {
+                        wrongCharsTyped += currentWords[originalIndex + i].length;
+                    }
+
+                    // Move originalIndex to the matched word
+                    originalIndex += lookahead + 1; // Move past matched word
+                    correctCount++;
+                    correctCharsTyped += typedWords[typedIndex].length;
+                    matchFound = true;
+                    break;
+                }
+            }
+            if (!matchFound) {
+                // No match found; count as wrong
+                wrongCount++;
+                wrongCharsTyped += typedWords[typedIndex].length;
+                // Do not increment originalIndex here
+            }
+        }
+    }
+
+    // Update counts
+    correctWordsTyped += correctCount;
+    wrongWords += wrongCount;
+    totalTypedWords += typedWords.length; // Count all typed words regardless of correctness
+    totalSkippedWords += skippedCount; // Ensure this is updated separately
+};
+const showResults = () => {		
+    const totalTypedWords = correctWordsTyped + wrongWords; // Calculate total typed words
+    const accuracy = totalTypedWords > 0 ? ((correctWordsTyped / totalTypedWords) * 100).toFixed(2) : 0;
+
+    // Calculate typing speed
+    const elapsedTime = Math.floor((Date.now() - startTime) / 1000); // Time in seconds
+    const typingSpeed = (((correctCharsTyped / 5) / (elapsedTime / 60))).toFixed(2); // Words per minute
+
+    // Prepare data to send to results page
+    const originalWordsString = JSON.stringify(originalWords);
+    const typedWordsString = JSON.stringify(allTypedWords); // Include all typed words
+
+    // Construct the URL for the results page
+    const resultsUrl = `results.html?exercise=${encodeURIComponent(words.join(" "))}&originalWords=${encodeURIComponent(originalWordsString)}&typedWords=${encodeURIComponent(typedWordsString)}&correctCount=${correctWordsTyped}&wrongCount=${wrongWords}&correctChars=${correctCharsTyped}&totalSkippedWords=${totalSkippedWords}&wrongChars=${wrongCharsTyped}&typingSpeed=${typingSpeed}&accuracy=${accuracy}&backspaceCount=${backspaceCount}&elapsedTime=${elapsedTime}`;
+
+    // Redirect to results page with parameters
+    window.location.href = resultsUrl;
+};
+
+const updateLiveResults = () => {
+    document.getElementById("live_results").innerHTML = `<br>
+       <b> <div style="Color:green"><table width="100%">
+       <tr><th>Correct Words:<b style="Color:green;text-align:center"> ${correctWordsTyped}</b></th>
+       <th><b>Incorrect Words: <b style="Color:red;text-align:center">${wrongWords}</b></b></th>
+       <th><b>Total Typed Words: ${correctWordsTyped + wrongWords}</b></th></tr>
+	 </table></div>
+    `;
+};
+
+// Ensure typedChunks is updated when the user types
+// Update the input event listener for typed_text
+document.getElementById("typed_text").addEventListener("input", (e) => {
+    const typedText = e.target.value.trim();
+    const currentWords = words.slice(currentIndex, currentIndex + chunkSize); // Get the current chunk of words
+
+    // Start the timer when the user starts typing
+    if (!timer) {
+        startTimer();
+    }
+
+    // Update live results
+    updateLiveResults();
+
+    // Update the highlighted word based on the typed text
+    const highlightEnabled = document.getElementById("highlight_toggle").checked;
+
+    if (highlightEnabled) {
+        const typedWords = typedText.split(/\s+/); // Use regex to split on one or more spaces
+        const referenceWords = currentWords; // Assuming currentWords contains the correct text words
+
+        let highlightedText = referenceWords.map((word, index) => {
+            if (index === typedWords.length) {
+                return `<span class="highlight">${word}</span>`; // Highlight the expected next word
+            }
+            return word;
+        }).join(" ");
+
+        document.getElementById("test_text").innerHTML = `<div class="word-set">${highlightedText}</div>`;
+    } else {
+        document.getElementById("test_text").innerHTML = `<div class="word-set">${currentWords.join(" ")}</div>`;
+    }
+
+    // Store the entire typed text for this chunk
+    if (typedText) {
+        const chunkIndex = Math.floor(currentIndex / chunkSize);
+        typedChunks[chunkIndex] = typedText;
+    }
+});
+
+// Modify the keydown event listener to navigate through typed chunks
+document.addEventListener('keydown', function(event) {
+    if (event.key === 'ArrowUp') {
+        if (currentChunkIndex > 0) {
+            currentChunkIndex--;
+            updateCurrentChunkDisplay(); // Update the display after changing the index
+            currentIndex = currentChunkIndex * chunkSize; // Update currentIndex based on chunk index
+            displayNextWords(); // Display the original words for the current chunk
+            
+            // Display the typed text for the current chunk
+            document.getElementById("typed_text").value = typedChunks[currentChunkIndex] || ""; // Show typed text for the current chunk
+            updateLiveResults();
+        }
+    } else if (event.key === 'ArrowDown') {
+        if (currentChunkIndex < typedChunks.length - 1) {
+            currentChunkIndex++;
+            updateCurrentChunkDisplay(); // Update the display after changing the index
+            currentIndex = currentChunkIndex * chunkSize; // Update currentIndex based on chunk index
+            displayNextWords(); // Display the original words for the current chunk
+            
+            // Display the typed text for the current chunk
+            document.getElementById("typed_text").value = typedChunks[currentChunkIndex] || ""; // Show typed text for the current chunk
+            updateLiveResults();
+        }
+    }
+});
+
+// Function to update the current chunk display
+function updateCurrentChunkDisplay() {
+    const totalChunks = Math.ceil(words.length / chunkSize); // Assuming chunkSize words per chunk
+    document.getElementById('current_chunk_number').innerText = `Chunk ${currentChunkIndex + 1}`; // Show current chunk number
+}
+
+// Event listeners for typing input
+document.getElementById("typed_text").addEventListener("input", (e) => {
+    const typedText = e.target.value.trim();
+    const currentWords = words.slice(currentIndex, currentIndex + chunkSize); // Get the current chunk of words
+
+    // Start the timer when the user starts typing
+    if (!timer) {
+        startTimer();
+    }
+
+    // Update live results
+    updateLiveResults();
+
+    // Store the entire typed text for this chunk
+    if (typedText) {
+        const chunkIndex = Math.floor(currentIndex / chunkSize); // Calculate the chunk index based on the current index
+        allTypedWords[chunkIndex] = typedText; // Store typed text for the current chunk
+    }
+});
+
+// Handle backspace count
+document.getElementById("typed_text").addEventListener("keydown", (e) => {
+    const allowBackspace = document.getElementById("backspace_toggle").checked; // Check if backspace is allowed
+    const typedText = document.getElementById("typed_text").value; // Get the current input value
+
+    if (e.key === "Backspace") {
+        if (!allowBackspace) {
+            // If backspace is not allowed, check the last character
+            if (typedText.length > 0 && typedText[typedText.length - 1] === ' ') {
+                e.preventDefault(); // Prevent backspace if the last character is a space
+            } else {
+                backspaceCount++; // Increment backspace count if allowed
+            }
+        } else {
+            backspaceCount++; // Increment backspace count if allowed
+        }
+    }
+});
+
+// Handle Enter key functionality
+document.getElementById("typed_text").addEventListener("keydown", (e) => {
+    const typedText = document.getElementById("typed_text").value; // Get the current input value
+    const typedWords = typedText.trim().split(" ").filter(word => word.length > 0); // Filter out empty strings
+    const currentWords = words.slice(currentIndex, currentIndex + chunkSize); // Get the current chunk of words
+
+    // Allow backspace functionality only if the last character is not a space
+    if (e.key === "Backspace") {
+        if (typedText.length > 0) {
+            if (typedText[typedText.length - 1] !== ' ') {
+                return; // Allow backspace
+            }
+        }
+    }
+
+    // Check if the pressed key is the up or down arrow key
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        return; // Exit the function early
+    }
+
+    // Handle Enter key functionality
+    if (e.key === "Enter") {
+        // Check if at least 90% of the chunk words are typed
+        const requiredWords = Math.ceil(currentWords.length * 0.9); // 90% of the current chunk
+        if (typedWords.length >= requiredWords) {
+            countResults(); // Call the counting function
+
+            currentChunkIndex++;
+            updateLiveResults();  
+
+            // Move to the next set of words
+            currentIndex += chunkSize; // Increment by chunkSize to move to the next set of words
+            document.getElementById("typed_text").value = ""; // Clear the input field
+
+            // Display the next set of words or show results if no more words
+            if (currentIndex < words.length) {
+                displayNextWords(); // Display the next set of words
+            } else {
+                // If no more words, show results
+                showResults();
+            }
+
+            // Update live results
+            updateLiveResults();
+        } else {
+            alert("Please type at least 90% of the words in the chunk before pressing Enter.");
+        }
+    }
+});
+
+// Event listener for the submit button
+document.getElementById("submit_button").addEventListener("click", () => {
+    if (!testCompleted) { // Check if the test is not already completed
+        countResults(); // Call the counting function
+        showResults(); // Call the function to show results
+    }
+});
+
+// Add this code to ensure the restart button works
+document.getElementById("restart_button").addEventListener("click", resetTest);
+// Reset the test on page load
+resetTest();
