@@ -153,7 +153,7 @@ const countResults = () => {
         if (originalIndex >= currentWords.length) {
             // Extra words typed beyond the expected words
             wrongCount++;
-            wrongCharsTyped += typedWords[typedIndex].length;
+            //wrongCharsTyped += typedWords[typedIndex].length;
             continue; 
         }
 
@@ -170,14 +170,14 @@ const countResults = () => {
         } else {
             // Look ahead for an exact match
             let matchFound = false;
-            for (let lookahead = 1; lookahead <= 3; lookahead++) { // Limit lookahead to 3 words
+            for (let lookahead = 1; lookahead <= 300; lookahead++) { // Limit lookahead to 3 words
                 if (originalIndex + lookahead < currentWords.length &&
                     typedWords[typedIndex] === currentWords[originalIndex + lookahead]) {
                     
                     // Count skipped words
                     skippedCount += lookahead; // Count all skipped words
                     for (let i = 0; i < lookahead; i++) {
-                        wrongCharsTyped += currentWords[originalIndex + i].length;
+                       // wrongCharsTyped += currentWords[originalIndex + i].length;
                     }
 
                     // Move originalIndex to the matched word
